@@ -1,6 +1,6 @@
 # kasten-kpi
 
-A custom Grafana dashboard (`kpi-dashboard.json`) for **Veeam Kasten K10**
+A custom Grafana dashboard (`kpi-dashboard.json`) for **Veeam Kasten**
 backup/export KPIs, built on top of Kasten's own Prometheus metrics — no
 external agent, no extra scraping, just Kasten's `remote_write` feeding a
 receiving Prometheus that Grafana reads from.
