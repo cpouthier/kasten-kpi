@@ -1,0 +1,371 @@
+{
+  "id": null,
+  "uid": "k10-kpi-dashboard",
+  "title": "Veeam Kasten KPI",
+  "tags": [
+    "kasten"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 0,
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "policy",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(catalog_actions_count, policy)",
+          "refId": "policyVariable"
+        },
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "label": "Namespace",
+        "query": {
+          "query": "label_values(kube_namespace_created{namespace!~\"kube-.*|kasten-io\"}, namespace)",
+          "refId": "namespaceVariable"
+        },
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "refresh": 1
+      },
+      {
+        "name": "rpo_target",
+        "type": "textbox",
+        "label": "RPO target (hours)",
+        "query": "24",
+        "current": {
+          "text": "24",
+          "value": "24"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Backup Success Rate ($policy / $namespace)",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(catalog_actions_count{policy=~\"$policy\",type=\"backup\",status=\"complete\",namespace=~\"$namespace\"}[${rpo_target}h])) / (sum(increase(catalog_actions_count{policy=~\"$policy\",type=\"backup\",status=~\"complete|failed|cancelled\",namespace=~\"$namespace\"}[${rpo_target}h])) > 0) * 100"
+        }
+      ],
+      "description": "Share of backup attempts (matching the selected policy and namespace) that completed successfully, out of every completed, failed, or cancelled attempt within the last 'RPO target' hours \u2014 not a lifetime ratio anymore, so old incidents fall out of scope once they're older than the RPO target. A cancelled backup counts as a failure. With a very short RPO target (an hour or less), this can briefly show 'No data' right at the edge of a policy's own schedule, if the window is narrower than the gap between two consecutive runs \u2014 that's expected, not an error."
+    },
+    {
+      "id": 3,
+      "title": "RPO Compliance (exported RP - cluster wide)",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "(count((((time() - ((max by (namespace) (max_over_time(timestamp(increase(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\"}[10m]) > 0)[7d:1m]))) or (max by (namespace) (timestamp(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\"} unless (catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\"} offset 15m)))))) or (max by (namespace) (catalog_actions_count{type=\"export\"}) * 0 + 604800)) and on(namespace) (kube_namespace_created)) <= $rpo_target * 3600) / count(((time() - ((max by (namespace) (max_over_time(timestamp(increase(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\"}[10m]) > 0)[7d:1m]))) or (max by (namespace) (timestamp(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\"} unless (catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\"} offset 15m)))))) or (max by (namespace) (catalog_actions_count{type=\"export\"}) * 0 + 604800)) and on(namespace) (kube_namespace_created))) * 100 or vector(0)"
+        }
+      ],
+      "description": "Percentage of applications currently present on the cluster (checked live via kube-state-metrics) whose most recent successful EXPORT is within the 'RPO target' set above. Deliberately ignores the policy/namespace filters (see 'RPO Compliance ($policy / $namespace)' for a filter-aware equivalent) but excludes namespaces that no longer exist, whose historical catalog entries would otherwise drag the percentage down artificially. Scoped to exported restore points only, not local snapshots. Detects both recurring policies (via a counter change) and a policy's very first-ever run (via the series appearing where it didn't exist ~15 minutes ago) \u2014 a one-time/on-demand policy run is now recognized as recent, not stuck at the 7-day fallback forever."
+    },
+    {
+      "id": 7,
+      "title": "RPO Compliance ($policy / $namespace)",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "(count(((time() - ((max by (namespace) (max_over_time(timestamp(increase(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"}[10m]) > 0)[7d:1m]))) or (max by (namespace) (timestamp(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} unless (catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} offset 15m)))))) or (max by (namespace) (catalog_actions_count{type=\"export\",policy=~\"$policy\",namespace=~\"$namespace\"}) * 0 + 604800)) <= $rpo_target * 3600) / count((time() - ((max by (namespace) (max_over_time(timestamp(increase(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"}[10m]) > 0)[7d:1m]))) or (max by (namespace) (timestamp(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} unless (catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} offset 15m)))))) or (max by (namespace) (catalog_actions_count{type=\"export\",policy=~\"$policy\",namespace=~\"$namespace\"}) * 0 + 604800))) * 100 or vector(0)"
+        }
+      ],
+      "description": "Percentage of applications (matching the selected policy and namespace) whose most recent successful EXPORT is within the 'RPO target' set above \u2014 same freshness check as 'RPO Compliance (exported RP - cluster wide)', just scoped to the current filter selection instead of the whole cluster. Scoped to exported restore points only, not local snapshots. An app only counts once at least one of its exports has completed since this dashboard started collecting metrics \u2014 until then it's treated as breached (7 days) rather than silently omitted. Detects both recurring policies (via a counter change) and a policy's very first-ever run (via the series appearing where it didn't exist ~15 minutes ago) \u2014 a one-time/on-demand policy run is now recognized as recent, not stuck at the 7-day fallback forever."
+    },
+    {
+      "id": 6,
+      "title": "Application RPO Status",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #Seconds"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Time since last success"
+              },
+              {
+                "id": "unit",
+                "value": "dtdhms"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #Status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "RPO Status"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "BREACHED",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "OK",
+                        "color": "green",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "namespace": "Application"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "refId": "Seconds",
+          "format": "table",
+          "instant": true,
+          "expr": "(time() - ((max by (namespace) (max_over_time(timestamp(increase(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"}[10m]) > 0)[7d:1m]))) or (max by (namespace) (timestamp(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} unless (catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} offset 15m)))))) or (max by (namespace) (catalog_actions_count{type=\"export\",policy=~\"$policy\",namespace=~\"$namespace\"}) * 0 + 604800)"
+        },
+        {
+          "refId": "Status",
+          "format": "table",
+          "instant": true,
+          "expr": "((time() - ((max by (namespace) (max_over_time(timestamp(increase(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"}[10m]) > 0)[7d:1m]))) or (max by (namespace) (timestamp(catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} unless (catalog_actions_count{type=\"export\",status=\"complete\",liveness=\"live\",policy=~\"$policy\",namespace=~\"$namespace\"} offset 15m)))))) or (max by (namespace) (catalog_actions_count{type=\"export\",policy=~\"$policy\",namespace=~\"$namespace\"}) * 0 + 604800)) <= bool ($rpo_target * 3600)"
+        }
+      ],
+      "description": "Per-application view of time since the last successful backup, and whether it's within the 'RPO target' set above (matching the selected policy and namespace). Only lists namespaces that currently exist on the cluster (checked live via kube-state-metrics). An app showing '7 days' / BREACHED hasn't had a successful backup detected since this dashboard started collecting metrics \u2014 that's a lower bound, not proof it's actually overdue, until it's had a chance to back up again under observation. Detects both recurring policies (via a counter change) and a policy's very first-ever run (via the series appearing where it didn't exist ~15 minutes ago) \u2014 a one-time/on-demand policy run is now recognized as recent, not stuck at the 7-day fallback forever."
+    }
+  ]
+}
