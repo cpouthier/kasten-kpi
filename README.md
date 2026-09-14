@@ -7,7 +7,7 @@ receiving Prometheus that Grafana reads from.
 
 Panels:
 
-- **Backup Success Rate** (`$policy` / `$namespace`) — share of backup
+- **Backup Success Rate** (`$policy` / `$namespace`) - share of backup
   attempts that completed successfully within the selected RPO window.
 - **RPO Compliance (exported RP – cluster wide)** — % of applications
   currently on the cluster whose most recent successful *export* is within
@@ -21,33 +21,45 @@ Panels:
 All of it is driven by three template variables: `$policy`, `$namespace`,
 and `$rpo_target` (in hours, editable live).
 
-Built alongside, and complementary to, the official community dashboard —
-[K10 Dashboard (21065)](https://grafana.com/grafana/dashboards/21065-k10-dashboard/)
-— and based on the architecture described in:
-
-- [Observability Series 1 — Prometheus remote writes](https://veeamkasten.dev/observability-series-1-prometheus-remote-writes)
-- [Observability Series 2 — Grafana multi-cluster dashboard](https://veeamkasten.dev/observability-series-2-grafana-multi-cluster-dashboard)
-
 ---
 
 ## Prerequisites
 
-This dashboard is **not** a drop-in import on a Grafana instance that merely
-has 21065 already working — it depends on things that dashboard doesn't
-need. Three things must be true on your cluster/Grafana before importing
+This dashboard is **not** a drop-in import on a Grafana instance. Three things must be true on your cluster/Grafana before importing
 `kpi-dashboard.json` as-is:
 
 ### 1. A Prometheus datasource with uid `prometheus`
 
 Every panel and template variable hardcodes
-`"datasource": {"type": "prometheus", "uid": "prometheus"}` — unlike 21065,
-there's no templated `${DS_PROMETHEUS}` placeholder resolved on import. If
+`"datasource": {"type": "prometheus", "uid": "prometheus"}`. If
 your Prometheus datasource has a different uid, every panel will show
 *"Datasource prometheus was not found"*.
 
 Fix: either provision your datasource with `uid: prometheus`, or
 find-and-replace every `"uid": "prometheus"` in the JSON with your real
 datasource uid before importing.
+
+To find your target instance's real datasource uid before importing, query
+its API:
+
+```bash
+curl -s -u <user>:<pass> http://<grafana-host>/api/datasources | python3 -m json.tool
+```
+
+Each datasource returned has a `"uid"` field — find the one with type
+`"prometheus"` and note its value.
+
+Other ways to find it, depending on how that instance was set up:
+
+- **Via the UI**: *Connections → Data sources → click the Prometheus
+  datasource* — the uid appears in the page URL
+  (`.../datasources/edit/<uid>`).
+- **If provisioned via file** (as on homelab): the uid is explicitly
+  written in the provisioning YAML (`datasources.yaml`, `uid:` field) — no
+  need to call the API, just read that file.
+- **If it was never set explicitly**, Grafana generates one automatically
+  on creation — in that case only the API or the UI reveals it, it isn't
+  written anywhere in your config.
 
 ### 2. `catalog_actions_count` must be in Kasten's `remote_write` keep-regex
 
