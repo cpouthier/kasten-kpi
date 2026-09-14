@@ -71,12 +71,11 @@ This metric is **not** in the default keep-regex from
 [Observability Series 1](https://veeamkasten.dev/observability-series-1-prometheus-remote-writes)
 (`action_.*` does not match `catalog_actions_count`, since it doesn't start
 with `action_`). If your Kasten `remote_write` config still uses that
-blog's original regex unmodified, this dashboard will be permanently empty
-even though 21065 works fine — 21065 relies on different metrics.
+blog's original regex unmodified, this dashboard will be permanently empty.
 
 Fix: Kasten's Helm values need something like:
 
-```yaml
+```yaml 
 clusterName: <your-cluster-name>
 prometheus:
   server:
@@ -130,10 +129,8 @@ scrapeConfigs:
 
 ### Not required, but worth knowing
 
-This dashboard has **no `cluster_name` filter**, unlike 21065 (which needs
-`${VAR_CLUSTER}`). If your receiving Prometheus gets `remote_write` from
-more than one cluster at once (a genuine multi-cluster setup per
-[Observability Series 2](https://veeamkasten.dev/observability-series-2-grafana-multi-cluster-dashboard)),
+This dashboard has **no `cluster_name` filter**,. If your receiving Prometheus gets `remote_write` from
+more than one cluster at once,
 every panel here will silently aggregate across all of them — there's no
 way to pick one cluster on this dashboard as it stands.
 
